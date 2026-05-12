@@ -40,6 +40,12 @@ const STORE_SCOPE_FALLBACK_RESPONSE =
   'Maaf, saya hanya dapat membantu terkait produk dan kategori toko.';
 const MANAGEMENT_UNSUPPORTED_RESPONSE =
   'Maaf, pengelolaan produk tidak tersedia melalui chat WhatsApp.';
+const DEFAULT_STORE_PROFILE = {
+  name: 'CV Netafarm',
+  location: 'Sidoarjo, Jawa Timur',
+  address:
+    'Jl. Raya Sawunggaling No.150 A, Jemundo, Kec. Taman, Kabupaten Sidoarjo, Jawa Timur 61257'
+};
 
 const knowledgeFile = path.join(__dirname, 'knowledge.json');
 const behaviorFile = path.join(__dirname, 'config', 'behavior.json');
@@ -123,6 +129,10 @@ function normalizeForMatch(value) {
 }
 
 function extractStoreNameFromBehavior(behavior) {
+  if (behavior && behavior.store && behavior.store.name) {
+    return behavior.store.name.trim();
+  }
+
   const instructions = behavior && behavior.system_instructions;
   if (!instructions) return '';
 
@@ -130,9 +140,27 @@ function extractStoreNameFromBehavior(behavior) {
   return match ? match[1].trim() : '';
 }
 
+function getStoreProfile(behavior) {
+  const store = behavior && behavior.store ? behavior.store : {};
+
+  return {
+    name:
+      (store.name && store.name.trim()) ||
+      extractStoreNameFromBehavior(behavior) ||
+      DEFAULT_STORE_PROFILE.name,
+    location:
+      (store.location && store.location.trim()) ||
+      DEFAULT_STORE_PROFILE.location,
+    address:
+      (store.address && store.address.trim()) ||
+      DEFAULT_STORE_PROFILE.address
+  };
+}
+
 function buildBehaviorContextDocuments(behavior) {
   const activeBehavior = behavior || getDefaultBehavior();
-  const storeName = extractStoreNameFromBehavior(activeBehavior);
+  const storeProfile = getStoreProfile(activeBehavior);
+  const storeName = storeProfile.name;
 
   if (!storeName) return [];
 
@@ -141,9 +169,11 @@ function buildBehaviorContextDocuments(behavior) {
       source: 'config/behavior.json',
       text: [
         `Nama toko: ${storeName}`,
+        `Lokasi toko: ${storeProfile.location}`,
+        `Alamat lengkap: ${storeProfile.address}`,
         'Jenis data: konfigurasi perilaku bot',
         `Sapaan: Halo, ada yang bisa saya bantu terkait produk ${storeName}?`,
-        'Pertanyaan umum: nama toko, toko apa, halo, hai, salam'
+        'Pertanyaan umum: nama toko, toko apa, lokasi toko, alamat toko, toko dimana, dimana alamatnya, halo, hai, salam'
       ].join('\n')
     }
   ];
@@ -876,6 +906,42 @@ function formatStoreInfoResponse(storeName, products) {
   return `${storeName || 'CV Netafarm'} menyediakan ${categoryText}. Saat ini ada ${products.length} produk di katalog kami.`;
 }
 
+function getStoreLocationIntentMatch(message) {
+  const normalizedMessage = normalizeForMatch(message);
+  const patterns = [
+    { keyword: 'alamat toko', regex: /\b(alamat|alamatnya)\b/ },
+    { keyword: 'lokasi toko', regex: /\b(lokasi|maps|map|google maps)\b/ },
+    { keyword: 'toko dimana', regex: /\b(toko|cv netafarm|netafarm)\b.*\b(dimana|mana|berada)\b/ },
+    { keyword: 'dimana toko', regex: /\b(dimana|mana)\b.*\b(toko|cv netafarm|netafarm)\b/ }
+  ];
+  const match = patterns.find((item) => item.regex.test(normalizedMessage));
+
+  return match
+    ? {
+        matched: true,
+        keyword: match.keyword,
+        normalizedMessage
+      }
+    : {
+        matched: false,
+        keyword: '',
+        normalizedMessage
+      };
+}
+
+function formatStoreLocationResponse(storeProfile) {
+  console.log(
+    `[DEBUG:LOCATION] formatter store=${JSON.stringify(storeProfile.name)} location=${JSON.stringify(storeProfile.location)}`
+  );
+
+  return [
+    `Lokasi ${storeProfile.name} berada di ${storeProfile.location}.`,
+    '',
+    'Alamat lengkap:',
+    `${storeProfile.address}.`
+  ].join('\n');
+}
+
 function getAvailableBrands(products) {
   return Array.from(new Set(products.map((product) => product.brand).filter(Boolean))).sort();
 }
@@ -1056,6 +1122,15 @@ function formatCategoryProductsResponse(products, message) {
 
 function detectChatIntent(message, products) {
   const normalizedMessage = normalizeForMatch(message);
+  const locationMatch = getStoreLocationIntentMatch(message);
+
+  if (locationMatch.matched) {
+    console.log(
+      `[DEBUG:LOCATION] detectedIntent=store_location matchedKeyword=${JSON.stringify(locationMatch.keyword)} normalizedQuery=${JSON.stringify(locationMatch.normalizedMessage)}`
+    );
+    return 'store_location';
+  }
+
   const safetyIntent = classifySafetyIntent(message);
 
   if (safetyIntent) {
@@ -1153,9 +1228,11 @@ function detectChatIntent(message, products) {
 }
 
 function buildIntentResponse(message, products, behavior) {
-  const storeName = extractStoreNameFromBehavior(behavior) || 'CV Netafarm';
+  const activeBehavior = behavior || getDefaultBehavior();
+  const storeProfile = getStoreProfile(activeBehavior);
+  const storeName = storeProfile.name;
   const fallbackResponse =
-    behavior.fallback_response || 'Mohon maaf, untuk item itu belum ada di toko kami.';
+    activeBehavior.fallback_response || 'Mohon maaf, untuk item itu belum ada di toko kami.';
   const intent = detectChatIntent(message, products);
   let response = null;
   let fallbackReason = null;
@@ -1164,6 +1241,13 @@ function buildIntentResponse(message, products, behavior) {
 
   if (intent === 'greeting') {
     response = formatGreetingResponse(storeName);
+  } else if (intent === 'store_location') {
+    const locationMatch = getStoreLocationIntentMatch(message);
+    response = formatStoreLocationResponse(storeProfile);
+    matches = {
+      matchedKeyword: locationMatch.keyword,
+      location: storeProfile.location
+    };
   } else if (intent === 'unsupported_admin_command') {
     response = MANAGEMENT_UNSUPPORTED_RESPONSE;
     fallbackReason = 'unsupported_admin_command';
@@ -1600,6 +1684,15 @@ function initializeClient() {
         console.log(
           `[DEBUG:RANKING] excludedLowRelevance=${JSON.stringify(intentResult.matches.excludedLowRelevance).slice(0, 1000)}`
         );
+      }
+
+      if (intentResult.intent === 'store_location' && intentResult.response) {
+        clearPaginationState(chatId, 'new_intent_store_location');
+        await msg.reply(intentResult.response);
+        console.log(
+          `[DEBUG:RESPONSE] type=deterministic intent=store_location formatterMode=store_location contexts=0 fallbackReason=none`
+        );
+        return;
       }
 
       const contextItems = ragEngine.retrieveContext(
