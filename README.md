@@ -673,27 +673,6 @@ Pagination is in memory. It resets when:
 
 If `lanjut` returns no active list, send a fresh query such as `daftar produk`.
 
-## Code Quality Findings
-
-Strengths:
-
-- Clear separation between dataset loading (`lib/dataset.js`) and retrieval (`lib/rag.js`).
-- Deterministic routing covers the most important store workflows without relying on the LLM.
-- Pagination state preserves sorted/filtered product lists per chat.
-- Safety filters reduce accidental product retrieval for unrelated, math, coding, and admin-style messages.
-- Dataset transformation creates useful semantic documents from raw CSV rows.
-
-Risks and maintainability concerns:
-
-- `server-v2.js` is large and owns many responsibilities: server, bot lifecycle, routing, formatting, API endpoints, and pagination.
-- Intent detection is regex-heavy and may require ongoing tuning for new query patterns.
-- Logs are verbose and can include user message content and prompt previews.
-- Dashboard and API endpoints do not have authentication.
-- Pagination and handled-message state are memory-only.
-- No automated test suite is currently configured.
-- RAG retrieval is local lexical scoring, not embedding-based semantic search.
-- CSV parsing is custom and may not cover every edge case of complex CSV files.
-
 ## Runtime Behavior Notes
 
 - `DatasetManager` loads datasets once at startup.
@@ -717,22 +696,3 @@ Risks and maintainability concerns:
 - The dashboard has no authentication.
 - There is no built-in deployment, Docker, or process manager configuration.
 - There are no automated tests in `package.json`.
-
-## Future Improvements
-
-- Split `server-v2.js` into modules for routes, WhatsApp lifecycle, intents, formatters, and pagination.
-- Add automated tests for intent routing, safety filtering, pagination, and dataset parsing.
-- Add authenticated dashboard access.
-- Add structured logging with redaction for chat IDs, message bodies, QR data, and prompts.
-- Add an embedding model and vector database for stronger retrieval.
-- Persist pagination/session state in Redis or a database.
-- Add dataset upload/reload controls in the dashboard.
-- Add analytics for common queries, fallback rates, and unanswered requests.
-- Add Docker and production process management.
-- Add a safer internal QR rendering method instead of sending QR data to a public QR image service.
-
-## License / Author
-
-License: MIT, as declared in `package.json`.
-
-Author: not specified in `package.json`.
